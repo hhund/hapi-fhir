@@ -20,26 +20,22 @@ package ca.uhn.fhir.jpa.dao.r4;
  * #L%
  */
 
-import ca.uhn.fhir.context.support.DefaultProfileValidationSupport;
 import ca.uhn.fhir.context.support.IValidationSupport;
 import ca.uhn.fhir.context.support.ValidationSupportContext;
 import ca.uhn.fhir.context.support.ValueSetExpansionOptions;
-import ca.uhn.fhir.jpa.api.dao.IFhirResourceDaoCodeSystem;
 import ca.uhn.fhir.jpa.api.dao.IFhirResourceDaoValueSet;
 import ca.uhn.fhir.jpa.dao.BaseHapiFhirResourceDao;
 import ca.uhn.fhir.jpa.model.cross.IBasePersistedResource;
 import ca.uhn.fhir.jpa.model.entity.ResourceTable;
+import ca.uhn.fhir.jpa.model.util.JpaConstants;
 import ca.uhn.fhir.rest.api.server.storage.TransactionDetails;
-import ca.uhn.fhir.jpa.term.api.ITermReadSvc;
 import ca.uhn.fhir.rest.api.server.RequestDetails;
 import ca.uhn.fhir.rest.server.exceptions.InternalErrorException;
 import ca.uhn.fhir.rest.server.exceptions.InvalidRequestException;
 import ca.uhn.fhir.util.ElementUtil;
-import org.apache.commons.codec.binary.StringUtils;
 import org.hl7.fhir.instance.model.api.IBaseResource;
 import org.hl7.fhir.instance.model.api.IIdType;
 import org.hl7.fhir.instance.model.api.IPrimitiveType;
-import org.hl7.fhir.r4.model.CodeSystem;
 import org.hl7.fhir.r4.model.CodeableConcept;
 import org.hl7.fhir.r4.model.Coding;
 import org.hl7.fhir.r4.model.IntegerType;
@@ -48,7 +44,6 @@ import org.hl7.fhir.r4.model.ValueSet.ConceptSetComponent;
 import org.hl7.fhir.r4.model.ValueSet.ConceptSetFilterComponent;
 import org.hl7.fhir.r4.model.ValueSet.FilterOperator;
 import org.hl7.fhir.r4.model.ValueSet.ValueSetExpansionContainsComponent;
-import org.springframework.beans.factory.annotation.Autowired;
 
 import java.util.Date;
 import java.util.List;
@@ -60,15 +55,7 @@ import static org.apache.commons.lang3.StringUtils.isNotBlank;
 
 public class FhirResourceDaoValueSetR4 extends BaseHapiFhirResourceDao<ValueSet> implements IFhirResourceDaoValueSet<ValueSet, Coding, CodeableConcept> {
 
-	@Autowired
-	private ITermReadSvc myHapiTerminologySvc;
-
-	@Autowired
-	private DefaultProfileValidationSupport myDefaultProfileValidationSupport;
-
 	private IValidationSupport myValidationSupport;
-	@Autowired
-	private IFhirResourceDaoCodeSystem<CodeSystem, Coding, CodeableConcept> myCodeSystemDao;
 
 	@Override
 	public void start() {
@@ -113,18 +100,16 @@ public class FhirResourceDaoValueSetR4 extends BaseHapiFhirResourceDao<ValueSet>
 		ValueSet source = new ValueSet();
 		source.setUrl(theUri);
 
-		source.getCompose().addInclude().addValueSet(theUri);
-
 		if (isNotBlank(theFilter)) {
-			ConceptSetComponent include = source.getCompose().addInclude();
-			ConceptSetFilterComponent filter = include.addFilter();
+			ConceptSetFilterComponent filter = source.getCompose().addInclude().addValueSet(theUri).addFilter();
 			filter.setProperty("display");
 			filter.setOp(FilterOperator.EQUAL);
 			filter.setValue(theFilter);
+		} else {
+			source.getCompose().addInclude().addValueSet(theUri);
 		}
 
-		ValueSet retVal = doExpand(source);
-		return retVal;
+		return doExpand(source);
 
 		// if (defaultValueSet != null) {
 		// source = getContext().newJsonParser().parseResource(ValueSet.class, getContext().newJsonParser().encodeResourceToString(defaultValueSet));
@@ -148,18 +133,16 @@ public class FhirResourceDaoValueSetR4 extends BaseHapiFhirResourceDao<ValueSet>
 		ValueSet source = new ValueSet();
 		source.setUrl(theUri);
 
-		source.getCompose().addInclude().addValueSet(theUri);
-
 		if (isNotBlank(theFilter)) {
-			ConceptSetComponent include = source.getCompose().addInclude();
-			ConceptSetFilterComponent filter = include.addFilter();
+			ConceptSetFilterComponent filter = source.getCompose().addInclude().addValueSet(theUri).addFilter();
 			filter.setProperty("display");
 			filter.setOp(FilterOperator.EQUAL);
 			filter.setValue(theFilter);
+		} else {
+			source.getCompose().addInclude().addValueSet(theUri);
 		}
 
-		ValueSet retVal = doExpand(source, theOffset, theCount);
-		return retVal;
+		return doExpand(source, theOffset, theCount);
 	}
 
 	@Override
@@ -197,6 +180,9 @@ public class FhirResourceDaoValueSetR4 extends BaseHapiFhirResourceDao<ValueSet>
 		ValueSet toExpand = new ValueSet();
 		toExpand.setId(theSource.getId());
 		toExpand.setUrl(theSource.getUrl());
+		if (theSource.getVersion() != null) {
+			toExpand.setVersion(theSource.getVersion());
+		}
 
 		for (ConceptSetComponent next : theSource.getCompose().getInclude()) {
 			toExpand.getCompose().addInclude(next);
@@ -236,7 +222,7 @@ public class FhirResourceDaoValueSetR4 extends BaseHapiFhirResourceDao<ValueSet>
 	private void addFilterIfPresent(String theFilter, ConceptSetComponent include) {
 		if (ElementUtil.isEmpty(include.getConcept())) {
 			if (isNotBlank(theFilter)) {
-				include.addFilter().setProperty("display").setOp(FilterOperator.EQUAL).setValue(theFilter);
+				include.addFilter().setProperty(JpaConstants.VALUESET_FILTER_DISPLAY).setOp(FilterOperator.EQUAL).setValue(theFilter);
 			}
 		}
 	}
@@ -262,9 +248,9 @@ public class FhirResourceDaoValueSetR4 extends BaseHapiFhirResourceDao<ValueSet>
 		if (myDaoConfig.isPreExpandValueSets() && !retVal.isUnchangedInCurrentOperation()) {
 			if (retVal.getDeleted() == null) {
 				ValueSet valueSet = (ValueSet) theResource;
-				myHapiTerminologySvc.storeTermValueSet(retVal, valueSet);
+				myTerminologySvc.storeTermValueSet(retVal, valueSet);
 			} else {
-				myHapiTerminologySvc.deleteValueSetAndChildren(retVal);
+				myTerminologySvc.deleteValueSetAndChildren(retVal);
 			}
 		}
 

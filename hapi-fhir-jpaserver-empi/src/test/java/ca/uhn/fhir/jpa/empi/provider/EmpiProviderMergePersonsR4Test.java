@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.endsWith;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -50,7 +51,7 @@ public class EmpiProviderMergePersonsR4Test extends BaseProviderR4Test {
 		List<Person.PersonLinkComponent> links = fromPerson.getLink();
 		assertThat(links, hasSize(1));
 		assertThat(links.get(0).getTarget().getReference(), is (myToPerson.getIdElement().toUnqualifiedVersionless().getValue()));
-		assertThat(links.get(0).getAssurance(), is (AssuranceLevelUtil.getAssuranceLevel(EmpiMatchResultEnum.MATCH, EmpiLinkSourceEnum.MANUAL).toR4()));
+		assertThat(links.get(0).getAssurance(), is (AssuranceLevelUtil.getAssuranceLevel(EmpiMatchResultEnum.REDIRECT, EmpiLinkSourceEnum.MANUAL).toR4()));
 	}
 
 	@Test
@@ -73,7 +74,7 @@ public class EmpiProviderMergePersonsR4Test extends BaseProviderR4Test {
 			myEmpiProviderR4.mergePersons(patientId, otherPatientId, myRequestDetails);
 			fail();
 		} catch (InvalidRequestException e) {
-			assertEquals("fromPersonId must have form Person/<id> where <id> is the id of the person", e.getMessage());
+			assertThat(e.getMessage(), endsWith("must have form Person/<id> where <id> is the id of the person"));
 		}
 
 	}
@@ -106,13 +107,13 @@ public class EmpiProviderMergePersonsR4Test extends BaseProviderR4Test {
 			myEmpiProviderR4.mergePersons(new StringType("Patient/1"), new StringType("Patient/2"), myRequestDetails);
 			fail();
 		} catch (InvalidRequestException e) {
-			assertEquals("fromPersonId must have form Person/<id> where <id> is the id of the person", e.getMessage());
+			assertThat(e.getMessage(), endsWith(" must have form Person/<id> where <id> is the id of the person"));
 		}
 		try {
 			myEmpiProviderR4.mergePersons(myFromPersonId, new StringType("Patient/2"), myRequestDetails);
 			fail();
 		} catch (InvalidRequestException e) {
-			assertEquals("toPersonId must have form Person/<id> where <id> is the id of the person", e.getMessage());
+			assertThat(e.getMessage(), endsWith(" must have form Person/<id> where <id> is the id of the person"));
 		}
 		try {
 			myEmpiProviderR4.mergePersons(new StringType("Person/1"), new StringType("Person/1"), myRequestDetails);

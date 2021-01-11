@@ -22,7 +22,7 @@ package ca.uhn.fhir.jpa.dao.predicate;
 
 import ca.uhn.fhir.context.RuntimeSearchParam;
 import ca.uhn.fhir.interceptor.model.RequestPartitionId;
-import ca.uhn.fhir.jpa.dao.SearchBuilder;
+import ca.uhn.fhir.jpa.dao.LegacySearchBuilder;
 import ca.uhn.fhir.jpa.model.entity.ResourceIndexedSearchParamDate;
 import ca.uhn.fhir.model.api.IQueryParameterType;
 import ca.uhn.fhir.model.api.TemporalPrecisionEnum;
@@ -49,9 +49,8 @@ import java.util.Map;
 public class PredicateBuilderDate extends BasePredicateBuilder implements IPredicateBuilder {
 	private static final Logger ourLog = LoggerFactory.getLogger(PredicateBuilderDate.class);
 
-	private Map<String, From<?, ResourceIndexedSearchParamDate>> myJoinMap;
 
-	PredicateBuilderDate(SearchBuilder theSearchBuilder) {
+	PredicateBuilderDate(LegacySearchBuilder theSearchBuilder) {
 		super(theSearchBuilder);
 	}
 
@@ -64,15 +63,15 @@ public class PredicateBuilderDate extends BasePredicateBuilder implements IPredi
 
 		String paramName = theSearchParam.getName();
 		boolean newJoin = false;
-		if (myJoinMap == null) {
-			myJoinMap = new HashMap<>();
-		}
+
+		Map<String, From<?, ResourceIndexedSearchParamDate>> joinMap = myQueryStack.getJoinMap();
 		String key = theResourceName + " " + paramName;
 
-		From<?, ResourceIndexedSearchParamDate> join = myJoinMap.get(key);
+		From<?, ResourceIndexedSearchParamDate> join = joinMap.get(key);
+
 		if (join == null) {
 			join = myQueryStack.createJoin(SearchBuilderJoinEnum.DATE, paramName);
-			myJoinMap.put(key, join);
+			joinMap.put(key, join);
 			newJoin = true;
 		}
 

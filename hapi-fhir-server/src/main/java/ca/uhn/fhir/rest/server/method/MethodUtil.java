@@ -213,6 +213,8 @@ public class MethodUtil {
 						((AtParameter) param).setType(theContext, parameterType, innerCollectionType, outerCollectionType);
 					} else if (nextAnnotation instanceof Count) {
 						param = new CountParameter();
+					} else if (nextAnnotation instanceof Offset) {
+						param = new OffsetParameter();
 					} else if (nextAnnotation instanceof GraphQLQueryUrl) {
 						param = new GraphQLQueryUrlParameter();
 					} else if (nextAnnotation instanceof GraphQLQueryBody) {
@@ -225,6 +227,11 @@ public class MethodUtil {
 						param = new ConditionalParamBinder(theRestfulOperationTypeEnum, ((ConditionalUrlParam) nextAnnotation).supportsMultiple());
 					} else if (nextAnnotation instanceof OperationParam) {
 						Operation op = theMethod.getAnnotation(Operation.class);
+						if (op == null) {
+							throw new ConfigurationException(
+								"@OperationParam detected on method that is not annotated with @Operation: " + theMethod.toGenericString());
+						}
+
 						OperationParam operationParam = (OperationParam) nextAnnotation;
 						param = new OperationParameter(theContext, op.name(), operationParam);
 						if (isNotBlank(operationParam.typeName())) {

@@ -5,7 +5,11 @@ import ca.uhn.fhir.model.api.IQueryParameterAnd;
 import ca.uhn.fhir.model.api.IQueryParameterOr;
 import ca.uhn.fhir.model.api.IQueryParameterType;
 import ca.uhn.fhir.model.api.Include;
-import ca.uhn.fhir.rest.api.*;
+import ca.uhn.fhir.rest.api.Constants;
+import ca.uhn.fhir.rest.api.SearchTotalModeEnum;
+import ca.uhn.fhir.rest.api.SortOrderEnum;
+import ca.uhn.fhir.rest.api.SortSpec;
+import ca.uhn.fhir.rest.api.SummaryEnum;
 import ca.uhn.fhir.rest.param.DateParam;
 import ca.uhn.fhir.rest.param.DateRangeParam;
 import ca.uhn.fhir.rest.param.QuantityParam;
@@ -17,7 +21,16 @@ import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
 
 import java.io.Serializable;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.commons.lang3.StringUtils.isBlank;
@@ -45,12 +58,14 @@ import static org.apache.commons.lang3.StringUtils.isNotBlank;
 
 public class SearchParameterMap implements Serializable {
 	private static final org.slf4j.Logger ourLog = org.slf4j.LoggerFactory.getLogger(SearchParameterMap.class);
+	public static final Integer INTEGER_0 = 0;
 
 	private final HashMap<String, List<List<IQueryParameterType>>> mySearchParameterMap = new LinkedHashMap<>();
 
 	private static final long serialVersionUID = 1L;
 
 	private Integer myCount;
+	private Integer myOffset;
 	private EverythingModeEnum myEverythingMode = null;
 	private Set<Include> myIncludes;
 	private DateRangeParam myLastUpdated;
@@ -63,6 +78,7 @@ public class SearchParameterMap implements Serializable {
 	private QuantityParam myNearDistanceParam;
 	private boolean myLastN;
 	private Integer myLastNMax;
+	private boolean myDeleteExpunge;
 
 	/**
 	 * Constructor
@@ -196,6 +212,14 @@ public class SearchParameterMap implements Serializable {
 
 	public void setCount(Integer theCount) {
 		myCount = theCount;
+	}
+
+	public Integer getOffset() {
+		return myOffset;
+	}
+
+	public void setOffset(Integer theOffset) {
+		myOffset = theOffset;
 	}
 
 	public EverythingModeEnum getEverythingMode() {
@@ -461,6 +485,13 @@ public class SearchParameterMap implements Serializable {
 			b.append(getCount());
 		}
 
+		if (getOffset() != null) {
+			addUrlParamSeparator(b);
+			b.append(Constants.PARAM_OFFSET);
+			b.append('=');
+			b.append(getOffset());
+		}
+
 		// Summary mode (_summary)
 		if (getSummaryMode() != null) {
 			addUrlParamSeparator(b);
@@ -533,6 +564,19 @@ public class SearchParameterMap implements Serializable {
 		return myNearDistanceParam;
 	}
 
+	public boolean isWantOnlyCount() {
+		return SummaryEnum.COUNT.equals(getSummaryMode()) || INTEGER_0.equals(getCount());
+	}
+
+	public boolean isDeleteExpunge() {
+		return myDeleteExpunge;
+	}
+
+	public SearchParameterMap setDeleteExpunge(boolean theDeleteExpunge) {
+		myDeleteExpunge = theDeleteExpunge;
+		return this;
+	}
+
 	public enum EverythingModeEnum {
 		/*
 		 * Don't reorder! We rely on the ordinals
@@ -568,7 +612,7 @@ public class SearchParameterMap implements Serializable {
 		}
 	}
 
-	public class IncludeComparator implements Comparator<Include> {
+	public static class IncludeComparator implements Comparator<Include> {
 
 		@Override
 		public int compare(Include theO1, Include theO2) {
@@ -584,7 +628,7 @@ public class SearchParameterMap implements Serializable {
 
 	}
 
-	public class QueryParameterOrComparator implements Comparator<List<IQueryParameterType>> {
+	public static class QueryParameterOrComparator implements Comparator<List<IQueryParameterType>> {
 		private final FhirContext myCtx;
 
 		QueryParameterOrComparator(FhirContext theCtx) {
@@ -599,7 +643,7 @@ public class SearchParameterMap implements Serializable {
 
 	}
 
-	public class QueryParameterTypeComparator implements Comparator<IQueryParameterType> {
+	public static class QueryParameterTypeComparator implements Comparator<IQueryParameterType> {
 
 		private final FhirContext myCtx;
 
@@ -652,7 +696,7 @@ public class SearchParameterMap implements Serializable {
 		return mySearchParameterMap.get(theName);
 	}
 
-	private void put(String theName, List<List<IQueryParameterType>> theParams) {
+	public void put(String theName, List<List<IQueryParameterType>> theParams) {
 		mySearchParameterMap.put(theName, theParams);
 	}
 

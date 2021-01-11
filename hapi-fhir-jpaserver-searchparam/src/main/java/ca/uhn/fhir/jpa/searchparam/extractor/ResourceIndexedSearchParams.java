@@ -105,24 +105,28 @@ public final class ResourceIndexedSearchParams {
 		return myLinks;
 	}
 
-	public void setParamsOn(ResourceTable theEntity) {
-		theEntity.setParamsString(myStringParams);
+	public void populateResourceTableSearchParamsPresentFlags(ResourceTable theEntity) {
 		theEntity.setParamsStringPopulated(myStringParams.isEmpty() == false);
-		theEntity.setParamsToken(myTokenParams);
 		theEntity.setParamsTokenPopulated(myTokenParams.isEmpty() == false);
-		theEntity.setParamsNumber(myNumberParams);
 		theEntity.setParamsNumberPopulated(myNumberParams.isEmpty() == false);
-		theEntity.setParamsQuantity(myQuantityParams);
 		theEntity.setParamsQuantityPopulated(myQuantityParams.isEmpty() == false);
-		theEntity.setParamsDate(myDateParams);
 		theEntity.setParamsDatePopulated(myDateParams.isEmpty() == false);
-		theEntity.setParamsUri(myUriParams);
 		theEntity.setParamsUriPopulated(myUriParams.isEmpty() == false);
-		theEntity.setParamsCoords(myCoordsParams);
 		theEntity.setParamsCoordsPopulated(myCoordsParams.isEmpty() == false);
 		theEntity.setParamsCompositeStringUniquePresent(myCompositeStringUniques.isEmpty() == false);
-		theEntity.setResourceLinks(myLinks);
 		theEntity.setHasLinks(myLinks.isEmpty() == false);
+	}
+
+
+	public void populateResourceTableParamCollections(ResourceTable theEntity) {
+		theEntity.setParamsString(myStringParams);
+		theEntity.setParamsToken(myTokenParams);
+		theEntity.setParamsNumber(myNumberParams);
+		theEntity.setParamsQuantity(myQuantityParams);
+		theEntity.setParamsDate(myDateParams);
+		theEntity.setParamsUri(myUriParams);
+		theEntity.setParamsCoords(myCoordsParams);
+		theEntity.setResourceLinks(myLinks);
 	}
 
 	void setUpdatedTime(Date theUpdateTime) {
@@ -145,7 +149,7 @@ public final class ResourceIndexedSearchParams {
 		return myPopulatedResourceLinkParameters;
 	}
 
-	public boolean matchParam(ModelConfig theModelConfig, String theResourceName, String theParamName, RuntimeSearchParam theParamDef, IQueryParameterType theParam, boolean theUseOrdinalDatesForDayComparison) {
+	public boolean matchParam(ModelConfig theModelConfig, String theResourceName, String theParamName, RuntimeSearchParam theParamDef, IQueryParameterType theParam) {
 		if (theParamDef == null) {
 			return false;
 		}
@@ -182,7 +186,7 @@ public final class ResourceIndexedSearchParams {
 		}
 		Predicate<BaseResourceIndexedSearchParam> namedParamPredicate = param ->
 			param.getParamName().equalsIgnoreCase(theParamName) &&
-				param.matches(theParam, theUseOrdinalDatesForDayComparison);
+				param.matches(theParam);
 
 		return resourceParams.stream().anyMatch(namedParamPredicate);
 	}
@@ -261,6 +265,7 @@ public final class ResourceIndexedSearchParams {
 		findMissingSearchParams(thePartitionSettings, theModelConfig, theEntity, theActiveSearchParams, RestSearchParameterTypeEnum.DATE, myDateParams);
 		findMissingSearchParams(thePartitionSettings, theModelConfig, theEntity, theActiveSearchParams, RestSearchParameterTypeEnum.URI, myUriParams);
 		findMissingSearchParams(thePartitionSettings, theModelConfig, theEntity, theActiveSearchParams, RestSearchParameterTypeEnum.TOKEN, myTokenParams);
+		findMissingSearchParams(thePartitionSettings, theModelConfig, theEntity, theActiveSearchParams, RestSearchParameterTypeEnum.SPECIAL, myCoordsParams);
 	}
 
 	@SuppressWarnings("unchecked")
@@ -299,10 +304,16 @@ public final class ResourceIndexedSearchParams {
 						case URI:
 							param = new ResourceIndexedSearchParamUri();
 							break;
+						case SPECIAL:
+							if (BaseSearchParamExtractor.COORDS_INDEX_PATHS.contains(nextEntry.getValue().getPath())) {
+								param = new ResourceIndexedSearchParamCoords();
+								break;
+							} else {
+								continue;
+							}
 						case COMPOSITE:
 						case HAS:
 						case REFERENCE:
-						case SPECIAL:
 						default:
 							continue;
 					}

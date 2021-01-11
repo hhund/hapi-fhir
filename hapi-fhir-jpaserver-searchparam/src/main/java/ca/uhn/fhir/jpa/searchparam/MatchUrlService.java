@@ -23,6 +23,7 @@ package ca.uhn.fhir.jpa.searchparam;
 import ca.uhn.fhir.context.FhirContext;
 import ca.uhn.fhir.context.RuntimeResourceDefinition;
 import ca.uhn.fhir.context.RuntimeSearchParam;
+import ca.uhn.fhir.jpa.model.util.JpaConstants;
 import ca.uhn.fhir.jpa.searchparam.registry.ISearchParamRegistry;
 import ca.uhn.fhir.model.api.IQueryParameterAnd;
 import ca.uhn.fhir.model.api.IQueryParameterType;
@@ -101,12 +102,21 @@ public class MatchUrlService {
 				IQueryParameterAnd<?> param = ParameterUtil.parseQueryParams(myContext, RestSearchParameterTypeEnum.HAS, nextParamName, paramList);
 				paramMap.add(nextParamName, param);
 			} else if (Constants.PARAM_COUNT.equals(nextParamName)) {
-				if (paramList.size() > 0 && paramList.get(0).size() > 0) {
+				if (paramList != null && paramList.size() > 0 && paramList.get(0).size() > 0) {
 					String intString = paramList.get(0).get(0);
 					try {
 						paramMap.setCount(Integer.parseInt(intString));
 					} catch (NumberFormatException e) {
 						throw new InvalidRequestException("Invalid " + Constants.PARAM_COUNT + " value: " + intString);
+					}
+				}
+			} else if (Constants.PARAM_OFFSET.equals(nextParamName)) {
+				if (paramList != null && paramList.size() > 0 && paramList.get(0).size() > 0) {
+					String intString = paramList.get(0).get(0);
+					try {
+						paramMap.setOffset(Integer.parseInt(intString));
+					} catch (NumberFormatException e) {
+						throw new InvalidRequestException("Invalid " + Constants.PARAM_OFFSET + " value: " + intString);
 					}
 				}
 			} else if (ResourceMetaParams.RESOURCE_META_PARAMS.containsKey(nextParamName)) {
@@ -119,6 +129,8 @@ public class MatchUrlService {
 			} else if (Constants.PARAM_SOURCE.equals(nextParamName)) {
 				IQueryParameterAnd<?> param = ParameterUtil.parseQueryParams(myContext, RestSearchParameterTypeEnum.TOKEN, nextParamName, paramList);
 				paramMap.add(nextParamName, param);
+			} else if (JpaConstants.PARAM_DELETE_EXPUNGE.equals(nextParamName)) {
+				paramMap.setDeleteExpunge(true);
 			} else if (nextParamName.startsWith("_")) {
 				// ignore these since they aren't search params (e.g. _sort)
 			} else {

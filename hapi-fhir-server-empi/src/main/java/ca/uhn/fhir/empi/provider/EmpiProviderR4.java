@@ -21,14 +21,14 @@ package ca.uhn.fhir.empi.provider;
  */
 
 import ca.uhn.fhir.context.FhirContext;
-import ca.uhn.fhir.empi.api.EmpiLinkSourceEnum;
-import ca.uhn.fhir.empi.api.EmpiMatchResultEnum;
-import ca.uhn.fhir.empi.api.IEmpiBatchSvc;
-import ca.uhn.fhir.empi.api.IEmpiLinkQuerySvc;
-import ca.uhn.fhir.empi.api.IEmpiLinkUpdaterSvc;
+import ca.uhn.fhir.empi.api.EmpiConstants;
+import ca.uhn.fhir.empi.api.EmpiLinkJson;
+import ca.uhn.fhir.empi.api.IEmpiControllerSvc;
+import ca.uhn.fhir.empi.api.IEmpiExpungeSvc;
 import ca.uhn.fhir.empi.api.IEmpiMatchFinderSvc;
-import ca.uhn.fhir.empi.api.IEmpiPersonMergerSvc;
-import ca.uhn.fhir.empi.api.IEmpiResetSvc;
+import ca.uhn.fhir.empi.api.IEmpiSubmitSvc;
+import ca.uhn.fhir.empi.api.MatchedTarget;
+import ca.uhn.fhir.empi.model.EmpiTransactionContext;
 import ca.uhn.fhir.rest.annotation.IdParam;
 import ca.uhn.fhir.rest.annotation.Operation;
 import ca.uhn.fhir.rest.annotation.OperationParam;
@@ -36,12 +36,14 @@ import ca.uhn.fhir.rest.api.server.RequestDetails;
 import ca.uhn.fhir.rest.server.exceptions.InvalidRequestException;
 import ca.uhn.fhir.rest.server.provider.ProviderConstants;
 import ca.uhn.fhir.rest.server.servlet.ServletRequestDetails;
-import ca.uhn.fhir.validation.IResourceLoader;
+import ca.uhn.fhir.util.ParametersUtil;
 import org.apache.commons.lang3.StringUtils;
 import org.hl7.fhir.instance.model.api.IAnyResource;
 import org.hl7.fhir.instance.model.api.IIdType;
 import org.hl7.fhir.r4.model.Bundle;
+import org.hl7.fhir.r4.model.CodeType;
 import org.hl7.fhir.r4.model.DecimalType;
+import org.hl7.fhir.r4.model.Extension;
 import org.hl7.fhir.r4.model.InstantType;
 import org.hl7.fhir.r4.model.IntegerType;
 import org.hl7.fhir.r4.model.Parameters;
@@ -50,17 +52,19 @@ import org.hl7.fhir.r4.model.Person;
 import org.hl7.fhir.r4.model.Practitioner;
 import org.hl7.fhir.r4.model.Resource;
 import org.hl7.fhir.r4.model.StringType;
+import org.hl7.fhir.r4.model.codesystems.MatchGrade;
 
 import java.util.Collection;
+import java.util.Comparator;
+import java.util.List;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 public class EmpiProviderR4 extends BaseEmpiProvider {
+	private final IEmpiControllerSvc myEmpiControllerSvc;
 	private final IEmpiMatchFinderSvc myEmpiMatchFinderSvc;
-	private final IEmpiPersonMergerSvc myPersonMergerSvc;
-	private final IEmpiLinkUpdaterSvc myEmpiLinkUpdaterSvc;
-	private final IEmpiLinkQuerySvc myEmpiLinkQuerySvc;
-	private final IEmpiResetSvc myEmpiExpungeSvc;
-	private final IEmpiBatchSvc myEmpiBatchSvc;
+	private final IEmpiExpungeSvc myEmpiExpungeSvc;
+	private final IEmpiSubmitSvc myEmpiSubmitSvc;
 
 	/**
 	 * Constructor
@@ -68,34 +72,58 @@ public class EmpiProviderR4 extends BaseEmpiProvider {
 	 * Note that this is not a spring bean. Any necessary injections should
 	 * happen in the constructor
 	 */
-	public EmpiProviderR4(FhirContext theFhirContext, IEmpiMatchFinderSvc theEmpiMatchFinderSvc, IEmpiPersonMergerSvc thePersonMergerSvc, IEmpiLinkUpdaterSvc theEmpiLinkUpdaterSvc, IEmpiLinkQuerySvc theEmpiLinkQuerySvc, IResourceLoader theResourceLoader, IEmpiResetSvc theEmpiExpungeSvc, IEmpiBatchSvc theEmpiBatchSvc) {
-		super(theFhirContext, theResourceLoader);
+	public EmpiProviderR4(FhirContext theFhirContext, IEmpiControllerSvc theEmpiControllerSvc, IEmpiMatchFinderSvc theEmpiMatchFinderSvc, IEmpiExpungeSvc theEmpiExpungeSvc, IEmpiSubmitSvc theEmpiSubmitSvc) {
+		super(theFhirContext);
+		myEmpiControllerSvc = theEmpiControllerSvc;
 		myEmpiMatchFinderSvc = theEmpiMatchFinderSvc;
-		myPersonMergerSvc = thePersonMergerSvc;
-		myEmpiLinkUpdaterSvc = theEmpiLinkUpdaterSvc;
-		myEmpiLinkQuerySvc = theEmpiLinkQuerySvc;
 		myEmpiExpungeSvc = theEmpiExpungeSvc;
-		myEmpiBatchSvc = theEmpiBatchSvc;
+		myEmpiSubmitSvc = theEmpiSubmitSvc;
 	}
 
 	@Operation(name = ProviderConstants.EMPI_MATCH, type = Patient.class)
-	public Bundle match(@OperationParam(name=ProviderConstants.EMPI_MATCH_RESOURCE, min = 1, max = 1) Patient thePatient) {
+	public Bundle match(@OperationParam(name = ProviderConstants.EMPI_MATCH_RESOURCE, min = 1, max = 1) Patient thePatient) {
 		if (thePatient == null) {
 			throw new InvalidRequestException("resource may not be null");
 		}
 
-		Collection<IAnyResource> matches = myEmpiMatchFinderSvc.findMatches("Patient", thePatient);
+		List<MatchedTarget> matches = myEmpiMatchFinderSvc.getMatchedTargets("Patient", thePatient);
+		matches.sort(Comparator.comparing((MatchedTarget m) -> m.getMatchResult().getNormalizedScore()).reversed());
 
 		Bundle retVal = new Bundle();
 		retVal.setType(Bundle.BundleType.SEARCHSET);
 		retVal.setId(UUID.randomUUID().toString());
 		retVal.getMeta().setLastUpdatedElement(InstantType.now());
 
-		for (IAnyResource next : matches) {
-			retVal.addEntry().setResource((Resource) next);
+		for (MatchedTarget next : matches) {
+			boolean shouldKeepThisEntry = next.isMatch() || next.isPossibleMatch();
+			if (!shouldKeepThisEntry) {
+				continue;
+			}
+
+			Bundle.BundleEntryComponent entry = new Bundle.BundleEntryComponent();
+			entry.setResource((Resource) next.getTarget());
+			entry.setSearch(toBundleEntrySearchComponent(next));
+
+			retVal.addEntry(entry);
 		}
 
 		return retVal;
+	}
+
+	private Bundle.BundleEntrySearchComponent toBundleEntrySearchComponent(MatchedTarget theMatchedTarget) {
+		Bundle.BundleEntrySearchComponent searchComponent = new Bundle.BundleEntrySearchComponent();
+		searchComponent.setMode(Bundle.SearchEntryMode.MATCH);
+		searchComponent.setScore(theMatchedTarget.getMatchResult().getNormalizedScore());
+
+		MatchGrade matchGrade = MatchGrade.PROBABLE;
+		if (theMatchedTarget.isMatch()) {
+			matchGrade = MatchGrade.CERTAIN;
+		} else if (theMatchedTarget.isPossibleMatch()) {
+			matchGrade = MatchGrade.POSSIBLE;
+		}
+
+		searchComponent.addExtension(EmpiConstants.FIHR_STRUCTURE_DEF_MATCH_GRADE_URL_NAMESPACE, new CodeType(matchGrade.toCode()));
+		return searchComponent;
 	}
 
 	@Operation(name = ProviderConstants.EMPI_MERGE_PERSONS, type = Person.class)
@@ -103,13 +131,8 @@ public class EmpiProviderR4 extends BaseEmpiProvider {
 										@OperationParam(name=ProviderConstants.EMPI_MERGE_PERSONS_TO_PERSON_ID, min = 1, max = 1) StringType theToPersonId,
 										RequestDetails theRequestDetails) {
 		validateMergeParameters(theFromPersonId, theToPersonId);
-		IAnyResource fromPerson = getLatestPersonFromIdOrThrowException(ProviderConstants.EMPI_MERGE_PERSONS_FROM_PERSON_ID, theFromPersonId.getValue());
-		IAnyResource toPerson = getLatestPersonFromIdOrThrowException(ProviderConstants.EMPI_MERGE_PERSONS_TO_PERSON_ID, theToPersonId.getValue());
-		validateMergeResources(fromPerson, toPerson);
-		validateSameVersion(fromPerson, theFromPersonId);
-		validateSameVersion(toPerson, theToPersonId);
 
-		return (Person) myPersonMergerSvc.mergePersons(fromPerson, toPerson, createEmpiContext(theRequestDetails));
+		return (Person) myEmpiControllerSvc.mergePersons(theFromPersonId.getValue(), theToPersonId.getValue(), createEmpiContext(theRequestDetails, EmpiTransactionContext.OperationType.MERGE_PERSONS));
 	}
 
 	@Operation(name = ProviderConstants.EMPI_UPDATE_LINK, type = Person.class)
@@ -119,24 +142,20 @@ public class EmpiProviderR4 extends BaseEmpiProvider {
 								  ServletRequestDetails theRequestDetails) {
 
 		validateUpdateLinkParameters(thePersonId, theTargetId, theMatchResult);
-		EmpiMatchResultEnum matchResult = extractMatchResultOrNull(theMatchResult);
-		IAnyResource person = getLatestPersonFromIdOrThrowException(ProviderConstants.EMPI_UPDATE_LINK_PERSON_ID, thePersonId.getValue());
-		IAnyResource target = getLatestTargetFromIdOrThrowException(ProviderConstants.EMPI_UPDATE_LINK_TARGET_ID, theTargetId.getValue());
-		validateSameVersion(person, thePersonId);
-		validateSameVersion(target, theTargetId);
 
-		return (Person) myEmpiLinkUpdaterSvc.updateLink(person, target, matchResult, createEmpiContext(theRequestDetails));
+		return (Person) myEmpiControllerSvc.updateLink(thePersonId.getValueNotNull(), theTargetId.getValue(), theMatchResult.getValue(), createEmpiContext(theRequestDetails, EmpiTransactionContext.OperationType.UPDATE_LINK));
 	}
 
 	@Operation(name = ProviderConstants.EMPI_CLEAR, returnParameters = {
 		@OperationParam(name = ProviderConstants.OPERATION_EMPI_BATCH_RUN_OUT_PARAM_SUBMIT_COUNT, type=DecimalType.class)
 	})
-	public Parameters clearEmpiLinks(@OperationParam(name=ProviderConstants.EMPI_CLEAR_TARGET_TYPE, min = 0, max = 1) StringType theTargetType) {
+	public Parameters clearEmpiLinks(@OperationParam(name=ProviderConstants.EMPI_CLEAR_TARGET_TYPE, min = 0, max = 1) StringType theTargetType,
+												ServletRequestDetails theRequestDetails) {
 		long resetCount;
 		if (theTargetType == null || StringUtils.isBlank(theTargetType.getValue())) {
-			resetCount = myEmpiExpungeSvc.removeAllEmpiLinks();
+			resetCount = myEmpiExpungeSvc.expungeAllEmpiLinks(theRequestDetails);
 		} else {
-			resetCount = myEmpiExpungeSvc.expungeAllEmpiLinksOfTargetType(theTargetType.getValueNotNull());
+			resetCount = myEmpiExpungeSvc.expungeAllEmpiLinksOfTargetType(theTargetType.getValueNotNull(), theRequestDetails);
 		}
 		Parameters parameters = new Parameters();
 		parameters.addParameter().setName(ProviderConstants.OPERATION_EMPI_CLEAR_OUT_PARAM_DELETED_COUNT)
@@ -150,17 +169,15 @@ public class EmpiProviderR4 extends BaseEmpiProvider {
 									 @OperationParam(name=ProviderConstants.EMPI_QUERY_LINKS_MATCH_RESULT, min = 0, max = 1) StringType theMatchResult,
 									 @OperationParam(name=ProviderConstants.EMPI_QUERY_LINKS_LINK_SOURCE, min = 0, max = 1) StringType theLinkSource,
 									 ServletRequestDetails theRequestDetails) {
-		IIdType personId = extractPersonIdDtOrNull(ProviderConstants.EMPI_QUERY_LINKS_PERSON_ID, thePersonId);
-		IIdType targetId = extractTargetIdDtOrNull(ProviderConstants.EMPI_QUERY_LINKS_TARGET_ID, theTargetId);
-		EmpiMatchResultEnum matchResult = extractMatchResultOrNull(theMatchResult);
-		EmpiLinkSourceEnum linkSource = extractLinkSourceOrNull(theLinkSource);
 
-		return (Parameters) myEmpiLinkQuerySvc.queryLinks(personId, targetId, matchResult, linkSource, createEmpiContext(theRequestDetails));
+		Stream<EmpiLinkJson> empiLinkJson = myEmpiControllerSvc.queryLinks(extractStringOrNull(thePersonId), extractStringOrNull(theTargetId), extractStringOrNull(theMatchResult), extractStringOrNull(theLinkSource), createEmpiContext(theRequestDetails, EmpiTransactionContext.OperationType.QUERY_LINKS));
+		return (Parameters) parametersFromEmpiLinks(empiLinkJson, true);
 	}
 
 	@Operation(name = ProviderConstants.EMPI_DUPLICATE_PERSONS, idempotent = true)
 	public Parameters getDuplicatePersons(ServletRequestDetails theRequestDetails) {
-		return (Parameters) myEmpiLinkQuerySvc.getPossibleDuplicates(createEmpiContext(theRequestDetails));
+		Stream<EmpiLinkJson> possibleDuplicates = myEmpiControllerSvc.getDuplicatePersons(createEmpiContext(theRequestDetails, EmpiTransactionContext.OperationType.DUPLICATE_PERSONS));
+		return (Parameters) parametersFromEmpiLinks(possibleDuplicates, false);
 	}
 
 	@Operation(name = ProviderConstants.EMPI_NOT_DUPLICATE)
@@ -169,22 +186,21 @@ public class EmpiProviderR4 extends BaseEmpiProvider {
 											 ServletRequestDetails theRequestDetails) {
 
 		validateNotDuplicateParameters(thePersonId, theTargetId);
-		IAnyResource person = getLatestPersonFromIdOrThrowException(ProviderConstants.EMPI_UPDATE_LINK_PERSON_ID, thePersonId.getValue());
-		IAnyResource target = getLatestPersonFromIdOrThrowException(ProviderConstants.EMPI_UPDATE_LINK_TARGET_ID, theTargetId.getValue());
-		validateSameVersion(person, thePersonId);
-		validateSameVersion(target, theTargetId);
+		myEmpiControllerSvc.notDuplicatePerson(thePersonId.getValue(), theTargetId.getValue(), createEmpiContext(theRequestDetails, EmpiTransactionContext.OperationType.NOT_DUPLICATE));
 
-		return (Parameters) myEmpiLinkUpdaterSvc.notDuplicatePerson(person, target, createEmpiContext(theRequestDetails));
+		Parameters retval = (Parameters) ParametersUtil.newInstance(myFhirContext);
+		ParametersUtil.addParameterToParametersBoolean(myFhirContext, retval, "success", true);
+		return retval;
 	}
 
-	@Operation(name = ProviderConstants.OPERATION_EMPI_BATCH_RUN, idempotent = false, returnParameters = {
+	@Operation(name = ProviderConstants.OPERATION_EMPI_SUBMIT, idempotent = false, returnParameters = {
 		@OperationParam(name = ProviderConstants.OPERATION_EMPI_BATCH_RUN_OUT_PARAM_SUBMIT_COUNT, type= IntegerType.class)
 	})
 	public Parameters empiBatchOnAllTargets(
 		@OperationParam(name= ProviderConstants.EMPI_BATCH_RUN_CRITERIA,min = 0 , max = 1) StringType theCriteria,
 		ServletRequestDetails theRequestDetails) {
 		String criteria = convertCriteriaToString(theCriteria);
-		long submittedCount  = myEmpiBatchSvc.runEmpiOnAllTargetTypes(criteria);
+		long submittedCount  = myEmpiSubmitSvc.submitAllTargetTypesToEmpi(criteria);
 		return buildEmpiOutParametersWithCount(submittedCount);
 	}
 
@@ -192,45 +208,45 @@ public class EmpiProviderR4 extends BaseEmpiProvider {
 		return theCriteria == null ? null : theCriteria.getValueAsString();
 	}
 
-	@Operation(name = ProviderConstants.OPERATION_EMPI_BATCH_RUN, idempotent = false, type = Patient.class, returnParameters = {
+	@Operation(name = ProviderConstants.OPERATION_EMPI_SUBMIT, idempotent = false, type = Patient.class, returnParameters = {
 		@OperationParam(name = ProviderConstants.OPERATION_EMPI_BATCH_RUN_OUT_PARAM_SUBMIT_COUNT, type = IntegerType.class)
 	})
 	public Parameters empiBatchPatientInstance(
 		@IdParam IIdType theIdParam,
 		RequestDetails theRequest) {
-		long submittedCount = myEmpiBatchSvc.runEmpiOnTarget(theIdParam);
+		long submittedCount = myEmpiSubmitSvc.submitTargetToEmpi(theIdParam);
 		return buildEmpiOutParametersWithCount(submittedCount);
 	}
 
-	@Operation(name = ProviderConstants.OPERATION_EMPI_BATCH_RUN, idempotent = false, type = Patient.class, returnParameters = {
+	@Operation(name = ProviderConstants.OPERATION_EMPI_SUBMIT, idempotent = false, type = Patient.class, returnParameters = {
 		@OperationParam(name = ProviderConstants.OPERATION_EMPI_BATCH_RUN_OUT_PARAM_SUBMIT_COUNT, type = IntegerType.class)
 	})
 	public Parameters empiBatchPatientType(
 		@OperationParam(name = ProviderConstants.EMPI_BATCH_RUN_CRITERIA) StringType theCriteria,
 		RequestDetails theRequest) {
 		String criteria = convertCriteriaToString(theCriteria);
-		long submittedCount = myEmpiBatchSvc.runEmpiOnPatientType(criteria);
+		long submittedCount = myEmpiSubmitSvc.submitPatientTypeToEmpi(criteria);
 		return buildEmpiOutParametersWithCount(submittedCount);
 	}
 
-	@Operation(name = ProviderConstants.OPERATION_EMPI_BATCH_RUN, idempotent = false, type = Practitioner.class, returnParameters = {
+	@Operation(name = ProviderConstants.OPERATION_EMPI_SUBMIT, idempotent = false, type = Practitioner.class, returnParameters = {
 		@OperationParam(name = ProviderConstants.OPERATION_EMPI_BATCH_RUN_OUT_PARAM_SUBMIT_COUNT, type = IntegerType.class)
 	})
 	public Parameters empiBatchPractitionerInstance(
 		@IdParam IIdType theIdParam,
 		RequestDetails theRequest) {
-		long submittedCount = myEmpiBatchSvc.runEmpiOnTarget(theIdParam);
+		long submittedCount = myEmpiSubmitSvc.submitTargetToEmpi(theIdParam);
 		return buildEmpiOutParametersWithCount(submittedCount);
 	}
 
-	@Operation(name = ProviderConstants.OPERATION_EMPI_BATCH_RUN, idempotent = false, type = Practitioner.class, returnParameters = {
+	@Operation(name = ProviderConstants.OPERATION_EMPI_SUBMIT, idempotent = false, type = Practitioner.class, returnParameters = {
 		@OperationParam(name = ProviderConstants.OPERATION_EMPI_BATCH_RUN_OUT_PARAM_SUBMIT_COUNT, type = IntegerType.class)
 	})
 	public Parameters empiBatchPractitionerType(
 		@OperationParam(name = ProviderConstants.EMPI_BATCH_RUN_CRITERIA) StringType theCriteria,
 		RequestDetails theRequest) {
 		String criteria = convertCriteriaToString(theCriteria);
-		long submittedCount = myEmpiBatchSvc.runEmpiOnPractitionerType(criteria);
+		long submittedCount = myEmpiSubmitSvc.submitPractitionerTypeToEmpi(criteria);
 		return buildEmpiOutParametersWithCount(submittedCount);
 	}
 

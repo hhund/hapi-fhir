@@ -5,14 +5,19 @@ import ca.uhn.fhir.jpa.config.BaseJavaConfigR4;
 import ca.uhn.fhir.jpa.model.entity.ModelConfig;
 import ca.uhn.fhir.jpa.search.DatabaseBackedPagingProvider;
 import ca.uhn.fhir.jpa.search.LuceneSearchMappingFactory;
+import ca.uhn.fhir.jpa.util.CurrentThreadCaptureQueriesListener;
 import ca.uhn.fhir.jpa.util.DerbyTenSevenHapiFhirDialect;
+import ca.uhn.fhir.jpa.validation.ValidationSettings;
+import ca.uhn.fhir.rest.client.interceptor.ThreadLocalCapturingInterceptor;
 import ca.uhn.fhir.rest.server.interceptor.RequestValidatingInterceptor;
 import ca.uhn.fhir.validation.ResultSeverityEnum;
 import ca.uhn.fhirtest.interceptor.PublicSecurityInterceptor;
+import net.ttddyy.dsproxy.support.ProxyDataSourceBuilder;
 import org.apache.commons.dbcp2.BasicDataSource;
 import org.apache.commons.lang3.time.DateUtils;
 import org.hibernate.dialect.PostgreSQL94Dialect;
 import org.hl7.fhir.dstu2.model.Subscription;
+import org.hl7.fhir.r5.utils.IResourceValidator;
 import org.springframework.beans.factory.annotation.Autowire;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -28,6 +33,7 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 import javax.persistence.EntityManagerFactory;
 import javax.sql.DataSource;
 import java.util.Properties;
+import java.util.concurrent.TimeUnit;
 
 @Configuration
 @Import(CommonConfig.class)
@@ -77,6 +83,15 @@ public class TestR4Config extends BaseJavaConfigR4 {
 	}
 
 
+	@Override
+	@Bean
+	public ValidationSettings validationSettings() {
+		ValidationSettings retVal = super.validationSettings();
+		retVal.setLocalReferenceValidationDefaultPolicy(IResourceValidator.ReferenceValidationPolicy.CHECK_VALID);
+		return retVal;
+	}
+
+
 	@Bean(name = "myPersistenceDataSourceR4", destroyMethod = "close")
 	public DataSource dataSource() {
 		BasicDataSource retVal = new BasicDataSource();
@@ -90,7 +105,16 @@ public class TestR4Config extends BaseJavaConfigR4 {
 		retVal.setPassword(myDbPassword);
 		retVal.setDefaultQueryTimeout(20);
 		retVal.setMaxConnLifetimeMillis(5 * DateUtils.MILLIS_PER_MINUTE);
-		return retVal;
+
+		DataSource dataSource = ProxyDataSourceBuilder
+			.create(retVal)
+//			.logQueryBySlf4j(SLF4JLogLevel.INFO, "SQL")
+			.logSlowQueryBySlf4j(10000, TimeUnit.MILLISECONDS)
+			.afterQuery(new CurrentThreadCaptureQueriesListener())
+			.countQuery()
+			.build();
+
+		return dataSource;
 	}
 
 	@Override

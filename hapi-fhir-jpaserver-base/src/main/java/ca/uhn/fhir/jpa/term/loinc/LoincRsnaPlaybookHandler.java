@@ -31,6 +31,8 @@ import org.hl7.fhir.r4.model.ValueSet;
 
 import java.util.*;
 
+import static ca.uhn.fhir.jpa.term.loinc.LoincUploadPropertiesEnum.LOINC_CODESYSTEM_VERSION;
+import static ca.uhn.fhir.jpa.term.loinc.LoincUploadPropertiesEnum.LOINC_CONCEPTMAP_VERSION;
 import static org.apache.commons.lang3.StringUtils.isNotBlank;
 import static org.apache.commons.lang3.StringUtils.trim;
 
@@ -80,18 +82,37 @@ public class LoincRsnaPlaybookHandler extends BaseLoincHandler implements IRecor
 		String rpid = trim(theRecord.get("RPID"));
 		String longName = trim(theRecord.get("LongName"));
 
+		// CodeSystem version from properties file
+		String codeSystemVersionId = myUploadProperties.getProperty(LOINC_CODESYSTEM_VERSION.getCode());
+
+		// ConceptMap version from properties files
+		String loincRsnaCmVersion;
+		if (codeSystemVersionId != null) {
+			loincRsnaCmVersion = myUploadProperties.getProperty(LOINC_CONCEPTMAP_VERSION.getCode()) + "-" + codeSystemVersionId;
+		} else {
+			loincRsnaCmVersion = myUploadProperties.getProperty(LOINC_CONCEPTMAP_VERSION.getCode());
+		}
+
+
 		// RSNA Codes VS
 		ValueSet vs;
-		if (!myIdToValueSet.containsKey(RSNA_CODES_VS_ID)) {
+		String rsnaCodesValueSetId;
+		if (codeSystemVersionId != null) {
+			rsnaCodesValueSetId = RSNA_CODES_VS_ID + "-" + codeSystemVersionId;
+		} else {
+			rsnaCodesValueSetId = RSNA_CODES_VS_ID;
+		}
+		if (!myIdToValueSet.containsKey(rsnaCodesValueSetId)) {
 			vs = new ValueSet();
 			vs.setUrl(RSNA_CODES_VS_URI);
-			vs.setId(RSNA_CODES_VS_ID);
+			vs.setId(rsnaCodesValueSetId);
 			vs.setName(RSNA_CODES_VS_NAME);
 			vs.setStatus(Enumerations.PublicationStatus.ACTIVE);
-			myIdToValueSet.put(RSNA_CODES_VS_ID, vs);
+			vs.setVersion(codeSystemVersionId);
+			myIdToValueSet.put(rsnaCodesValueSetId, vs);
 			myValueSets.add(vs);
 		} else {
-			vs = myIdToValueSet.get(RSNA_CODES_VS_ID);
+			vs = myIdToValueSet.get(rsnaCodesValueSetId);
 		}
 
 		if (!myCodesInRsnaPlaybookValueSet.contains(loincNumber)) {
@@ -170,14 +191,26 @@ public class LoincRsnaPlaybookHandler extends BaseLoincHandler implements IRecor
 			code.addPropertyCoding(loincCodePropName, ITermLoaderSvc.LOINC_URI, partNumber, partName);
 		}
 
+		String partConceptMapId;
+		String termConceptMapId;
+		if (codeSystemVersionId != null) {
+			partConceptMapId = LoincPartRelatedCodeMappingHandler.LOINC_PART_TO_RID_PART_MAP_ID + "-" + codeSystemVersionId;
+			termConceptMapId = LoincPartRelatedCodeMappingHandler.LOINC_TERM_TO_RPID_PART_MAP_ID + "-" + codeSystemVersionId;
+		} else {
+			partConceptMapId = LoincPartRelatedCodeMappingHandler.LOINC_PART_TO_RID_PART_MAP_ID;
+			termConceptMapId = LoincPartRelatedCodeMappingHandler.LOINC_TERM_TO_RPID_PART_MAP_ID;
+		}
+
 		// LOINC Part -> Radlex RID code mappings
 		if (isNotBlank(rid)) {
 			addConceptMapEntry(
 				new ConceptMapping()
-					.setConceptMapId(LoincPartRelatedCodeMappingHandler.LOINC_PART_TO_RID_PART_MAP_ID)
+					.setConceptMapId(partConceptMapId)
 					.setConceptMapUri(LoincPartRelatedCodeMappingHandler.LOINC_PART_TO_RID_PART_MAP_URI)
+					.setConceptMapVersion(loincRsnaCmVersion)
 					.setConceptMapName(LoincPartRelatedCodeMappingHandler.LOINC_PART_TO_RID_PART_MAP_NAME)
 					.setSourceCodeSystem(ITermLoaderSvc.LOINC_URI)
+					.setSourceCodeSystemVersion(codeSystemVersionId)
 					.setSourceCode(partNumber)
 					.setSourceDisplay(partName)
 					.setTargetCodeSystem(RID_CS_URI)
@@ -191,10 +224,12 @@ public class LoincRsnaPlaybookHandler extends BaseLoincHandler implements IRecor
 		if (isNotBlank(rpid)) {
 			addConceptMapEntry(
 				new ConceptMapping()
-					.setConceptMapId(LoincPartRelatedCodeMappingHandler.LOINC_TERM_TO_RPID_PART_MAP_ID)
+					.setConceptMapId(termConceptMapId)
 					.setConceptMapUri(LoincPartRelatedCodeMappingHandler.LOINC_TERM_TO_RPID_PART_MAP_URI)
+					.setConceptMapVersion(loincRsnaCmVersion)
 					.setConceptMapName(LoincPartRelatedCodeMappingHandler.LOINC_TERM_TO_RPID_PART_MAP_NAME)
 					.setSourceCodeSystem(ITermLoaderSvc.LOINC_URI)
+					.setSourceCodeSystemVersion(codeSystemVersionId)
 					.setSourceCode(loincNumber)
 					.setSourceDisplay(longCommonName)
 					.setTargetCodeSystem(RPID_CS_URI)
